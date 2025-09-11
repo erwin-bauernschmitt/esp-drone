@@ -202,6 +202,207 @@ esp_netif_ip_info_t ip_info = {
 - The `UDP_TX` task executs the `udp_server_tx_task()` function, which is defined in `wifi_esp32.c`.
 - The `udp_server_tx_task()` function loops calling the FreeRTOS `xQueueReceive()` function to read the next UDP frame the app code wants to send from the `udpDataTx` queue. If the queue is empty, this will cause the `UDP_TX` task to block until a UDP frame is added to the `udpDataTx` queue. Once a UDP fame is ready, it will compute a checksum using `calculate_cksum()` and append it to the frame. It then uses the ESP-IDF `sendto()` function along with the `sock` handle to hand the UDP frame to LwIP, which will send the UDP frame to the last IP address that transmitted to `port 2390` via `esp_netif` and `esp_wifi`.  
 
+#### Wifi Link Initialisation
+
+- `systemTask()` then calls `systemInit()`, also defined in `system.c`. 
+- The first initialisation function in `systemInit()` is `wifiLinkInit()` (defined in `wifilink.c`), which creates the `crtpPacketDelivery` queue and creates the `WIFILINK` task (with `PRIORITY=2`) that runs the `wifilinkTask()` function. 
+- The `wifilinkTask()` function bridges the `udpDataRx` queue with the rest of the application logic by forwarding complete CRTP messages from the `udpDataRx` queue to the `crtpPacketDelivery` queue, reformatting any ESP-NOW messages in the `udpDataRx` queue into full CRTP messages before forwarding them. 
+- The `wifilinkTask()` function retrieves messages from the `udpDataRx` queue with `wifiGetDataBlocking()`, which is defined in `wifi_esp32.c` and uses `xQueueReceive()` to block the `WIFILINK` task until a message can be received from the queue. 
+- Note that `commInit()` in `comm.c` uses `crtpSetLink(wifilinkGetLink())` to point the CRTP link struct to the `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions 
+
+#### Task Dump Initialisation
+
+- `systemInit()` then calls `sysLoadInit()` (defined in `sysload.c`), which creates and starts the 5-second auto-reloading `sysLoadMonitorTimer` FreeRTOS software timer. 
+- Every 5 seconds, the `sysLoadMonitorTimer` will call the `timerHandler()` callback function, which logs the task dump in the terminal if `triggerDump=1` and there are less than 32 tasks (which is true initially, since `triggerDump` is preset and then `timerHandler()` resets `triggerDump=0` after completing the first task dump after startup).
+
+#### Debug Initialisation
+- `systemInit()` then calls `debugInit()`, which currently does nothing because `DEBUG_PRINT_ON_SEGGER_RTT` is not defined.
+
+#### CRTP Initialisation
+- `systemInit()` then calls `crtpInit()` (defined in `crtp.c`), which creates the `txQueue` queue and the `CRTP-TX` and `CRTP-RX` tasks (with `PRIORITY=2`) that run the `crtpTxTask()` and `crtpRxTask()` functions respectively. 
+- Note that `commInit()` in `comm.c` uses `crtpSetLink(wifilinkGetLink())` to point the CRTP link struct to the `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions 
+- `crtpTxTask()` is defined in `crtp.c` and essentially uses function pointers to run `wifilinkSendPacket()` (defined in `wifilink.c`), which makes sure the CRTP packet is not too long, blinks the blue LED, and then uses `wifiSendData()` (defined in `wifi_esp32.c`) to add the packet to the `udpDataTx` queue with `xQueueSend()`. This runs in a loop until `txQueue` is empty, after which the `CRTP-TX` task blocks until another packet is added to `txQueue`. 
+- `crtpRxTask()` is defined in `crtp.` and essentially uses function pointers to run `wifilinkReceiveCRTPPacket()` (defined in `wifilink.c`), which receives a CRTP packet from the `crtpPacketDelivery` queue with `xQueueReceive()` (blocking for up to 100ms if the queue is empty) and blinks the green LED. The `crtpRxTask()` function then adds the CRTP packet to the queue specified within the CRTP packet (see below for list of `CRTPPort` options).
+  ```
+  typedef enum {
+    CRTP_PORT_CONSOLE          = 0x00,
+    CRTP_PORT_PARAM            = 0x02,
+    CRTP_PORT_SETPOINT         = 0x03,
+    CRTP_PORT_MEM              = 0x04,
+    CRTP_PORT_LOG              = 0x05,
+    CRTP_PORT_LOCALIZATION     = 0x06,
+    CRTP_PORT_SETPOINT_GENERIC = 0x07,
+    CRTP_PORT_SETPOINT_HL      = 0x08,
+    CRTP_PORT_PLATFORM         = 0x0D,
+    CRTP_PORT_LINK             = 0x0F,
+  } CRTPPort;
+  ```
+- Note that `crtp.c` contains a function called `crtpInitTaskQueue()`, which can be called by other tasks to create a queue that is attached to one of the `CRTPPort` types, which will then be registered in the `queues[]` array that is private to `crtp.c`. Then if the `CRTP-RX` task receives a packet addressed to that port, it will be put into that task's queue. 
+
+#### Console Initialisation
+- `systemInit()` then calls `consoleInit()` (defined in `console.c`), which initialises an empty CRTP packet configured to be transmitted to a `CRTP_PORT_CONSOLE` port, creates a binary semaphore for sending one message at a time, and initialises the `messageSendingIsPending` flag as `false`. Effectively, this process allows the drone to send CRTP packets to the ground station's console.
+
+#### Configuration Initialisation
+- `systemInit()` then calls `configblockInit()`, which is made for reading a radio communication configuration from EEPROM over I2C, but since neither ESP-Drone or Dell's Angel has an external EEPROM, it will load the following `configblockDefault` configuration into RAM:
+```
+static configblock_t configblockDefault =
+{
+    .magic = MAGIC,  // 0x43427830
+    .version = VERSION,  // 1
+    .radioChannel = RADIO_CHANNEL,  // 80
+    .radioSpeed = RADIO_DATARATE,  // 2
+    .calibPitch = 0.0,
+    .calibRoll = 0.0,
+    .radioAddress_upper = ((uint64_t)RADIO_ADDRESS >> 32),  // 0xE7E7E7E7E7ULL
+    .radioAddress_lower = (RADIO_ADDRESS & 0xFFFFFFFFULL),
+};
+``` 
+- However, since the CrazyRadio is not being used, this is probably redundant.
+
+#### Worker Initialisation
+- `systemInit()` then calls `workerInit()` (defined in `worker.c`), which just creates the `workerQueue` FreeRTOS queue. 
+
+#### ADC Initialisation
+- `systemInit()` then calls `adcInit()` (defined in `adc_esp32.c`), which sets the ADC1 bit resolution to 12 bits (fixed default for ESP32-S3 anyway), sets the ADC1 attenuation factor to `attn=3` or 11 dB so that the ADC can measure pin voltages over the full 0-3.3V range, and then attempts to calibrate ADC1 with that particular attenuation factor to correct for ADC inaccuracies due to process variations.
+
+#### LED Sequence Initialisation
+- `systemInit()` then calls `ledseqInit()` (defined in `ledseq.c`), which redundantly calls `ledInit()` again, registers all of the predefined system LED sequences with a priority implied by their registration order, initialises an array of state flags as all `0` (one for each sequence), creates an array of one-shot FreeRTOS software timers (one for each sequence), creates the `ledseqMutex` mutex for changing LED sequences, creates the `ledseqCmdQueue` queue for processing LED sequences, and then finally creates the `LEDSEQCMD` task (with `PRIORITY=1`), which runs the `lesdeqCmdTask()` function.
+- The `lesdeqCmdTask()` function is defined in `ledseq.c` and it runs in a loop, blocking until an LED sequence command is put in `ledseqCmdQueue` via `ledseqRun()` or `ledseqStop()`. When either a run or stop command is received from the queue, it immediately starts that sequence, which is then handled asynchronously by the previously initialised software timers. 
+
+#### Power Management Initialisation
+- `systemInit()` then calls `pmInit()` (defined in `pm_esplane.c`), which configures battery voltage measurement to occur with a 2x multiplier (to correct for the voltage divider used on the PCB), initialises both the min and max battery voltages as 3.7V, and creates the `PWRMGNT` task (with `PRIORITY=1`) that runs the `pmTask()` function. 
+- The `pmTask()` function is defined in `pm_esplane.c` and it runs a 100 ms loop that samples VBAT, tracks how long VBAT has been below low/critical thresholds, decides charging/charged/normal/low-power using charger flags and those timers, then drives LEDs/sounds, toggles flight permission, and can auto-shutdown on sustained critical voltage or long inactivity (although the auto-shutdown has not been implemented).
+
+#### Buzzer Initialisation
+- Finally, `systemInit()` calls `buzzerInit()` (defined in `buzzer.c`), which calls `buzzDeckInit()` (defined in `buzzdeck.c`) since `CONFIG_BUZZER_ON=1` in `sdkconfig.h` for some reason (potentially redundant since no buzz deck is being used).
+- `buzzDeckInit()` calls `piezzoInit()` (defined in `piezzo.c`), which configures a timer with the ESP32's LED Control peripheral to set the tone of the buzzer, configures a channel with the LED Control peripheral to be able to drive the buzzer pin with the timer, and exposes a control interface so that higher level code can play sounds or patterns.
+
+####
+- `systemTask()` then moves on from `systemInit()` to call `commInit()` (defined in `comm.c`), which...
+
+## ESP32-Pi UART Communication 
+
+### What data is being sent?
+
+- The ROS 2 Orb SLAM application running on the ground station requires IMU data fusion to improve the accuracy of its Orb localisaiton.
+- Hence, the IMU data (along with the timestamp for when it was created) needs to be transmitted to the Raspberry Pi Zero 2 W over UART so that it can be timestamped with the same timebase as the Pi Camera video feed and transmitted over wifi to the ground station.
+- Since the ESP32 does several stages of IMU data processing, there are three options for what data can be transmitted to the Pi over UART:
+  1. The raw IMU data straight from the MPU6050 after being read by the `SENSORS` task.
+  1. The IMU data after it has been processed by the `SENSORS` task.
+  1. The Kalman-filtered IMU data, or state estimation of the current accel/gyro values.
+
+#### Raw data
+- This data is read by `sensorsTask()` --> `i2cdevReadReg8()` in `sensors_mpu6050_hm5883L_ms5611.c`.
+- It is stored in `buffer`, which is currently defined as a static global variable in `sensors_mpu6050_hm5883L_ms5611.c`, meaning it exists for the full program duration but is only visible to the functions defined in `sensors_mpu6050_hm5883L_ms5611.c`. 
+- The structure of `buffer` is a `uint8_t` array of length 28, although the IMU only uses the first 14 elements, with the remaining 14 elements being reserved in case a magnetometer and barometer are being read over I2C as well.
+- This raw data is not immediately useful to ROS since it hasn't been axes-corrected, scale-corrected, bias-corrected, or filtered.
+
+#### Processed data
+- This data is created by `sensorsTask()` --> `processAccGyroMeasurements()` in `sensors_mpu6050_hm5883L_ms5611.c`.
+- It processes the data in `buffer` and then updates the data in `sensorData.acc` and `sensorData.gyro` with the new values. 
+- `sensorData` is currently defined as a static global variable in `sensors_mpu6050_hm5883L_ms5611.c`, meaning it exists for the full program duration but is only visible to the functions defined in `sensors_mpu6050_hm5883L_ms5611.c`. 
+- Then `sensorsTask()` uses the new `sensorData` values to overwrite the contents of two queues with handles `accelerometerDataQueue` and `gyroDataQueue` by calling `xQueueOverwrite()`. 
+- Given these handles, any FreeRTOS task (such as a UART task) can receive or peek these data queues to obtain the latest processed IMU data.
+
+!!! I think the Kalman task consumes these Queue values by receiving from them, so a UART task might not be able to peek these queue values. Might need to read directly from sensorData by requesting a pointer. !!!
+
+#### Kalman-filtered data
+
+
+#### Current plan
 
 
 
+### IMU Data
+
+- `stabilizerInit()` in `stabilizer.c` creates the `STABILIZER` task (with `PRIORITY=7`) which runs the `stabilizerTask()` function. 
+- `stabilizerTask()` in `stabilizer.c` has a main loop, and the first function call in the loop is `sensorsWaitDataReady()`, which blocks the task until data is ready, causing the loop to run at a frequency of 1kHz or 500Hz if the kalman filter is being used.
+- `sensorsWaitDataReady()` in `sensors.c` points to `sensorsMpu6050Hmc5883lMs5611WaitDataReady()` in `sensors_mpu6050_hm5883L_ms5611.c`, which takes the `dataReady` semaphore, blocking until it becomes available. `sensorsTask()` also in `sensors_mpu6050_hm5883L_ms5611.c` is what gives the `dataReady` semaphore after it has read and processed the IMU data.
+- `sensorsTaskInit()` in `sensors_mpu6050_hm5883L_ms5611.c` creates the `SENSORS` task (with `PRIORITY=6`), which calls the `sensorsTask()` function.
+- `sensorsTask()` in `sensors_mpu6050_hm5883L_ms5611.c` does the following:
+  1. Takes the `sensorsDataReady` semaphore when it becomes available (given by `sensors_inta_isr_handler()` when the MPU6050 raises the INT pin or GPIO12).
+  1. Saves the `imuIntTimestamp` timestamp to `sensorData.interruptTimestamp`, measured in microseconds since startup (`uint64_t` created by `sensors_inta_isr_handler()` when the MPU6050 raises the INT pin or GPIO12).
+  1. Reads the MPU6050's data buffer into a sensor data buffer (and magnetometer data, if enabled) with `i2cdevReadReg8()`.
+  1. Processes the data with `processAccGyroMeasurements()` in `sensors_mpu6050_hm5883L_ms5611.c` by correcting for the MPU6050's mounting direction as it reads the buffer data into the `accelRaw` and `gyroRaw` structs, compensating the gyro measurements for any bias that has been detected by `processGyroBias()`, scaling the accel and gyro raw data based on the selected user-programmable scales, compensating the accel measurements with the misalignment-correcting trim values set by the user, and then low-pass filtering the accel and gyro data to suppress noise.
+  1. Value-copies the processed accel and gyro data to `accelerometerDataQueue` and `gyroDataQueue` using `xQueueOverwrite()`, so the latest values are always available in the queue.
+  1. Gives the `dataReady` semaphore to unblock the `STABILIZER` task. 
+
+- `compressState()` in `stabilizer.c` flattens the `state` struct of type `state_t` into `stateCompressed` and also converts units.
+
+- Before being "compressed", `state` looks like this:
+  
+  ```
+  {
+    "state": {
+      "position": {
+        "x": "32-bit float measured in m",
+        "y": "32-bit float measured in m",
+        "z": "32-bit float measured in m"
+      },
+      "velocity": {
+        "x": "32-bit float measured in m s^-1",
+        "y": "32-bit float measured in m s^-1",
+        "z": "32-bit float measured in m s^-1"
+      },
+      "acc": {
+        "x": "32-bit float measured in m s^-2",
+        "y": "32-bit float measured in m s^-2",
+        "z": "32-bit float measured in m s^-2"
+      },
+      "attitudeQuaternion": {
+        "x": "32-bit float component of a normalised quaternion",
+        "y": "32-bit float component of a normalised quaternion",
+        "z": "32-bit float component of a normalised quaternion",
+        "w": "32-bit float component of a normalised quaternion"
+      },
+      "gyro": {
+        "x": "32-bit float measured in deg s^-2",
+        "y": "32-bit float measured in deg s^-2",
+        "z": "32-bit float measured in deg s^-2"
+      }
+    }
+  }
+  ```
+- After being "compressed", `stateCompressed` looks like this: 
+  ```
+  {
+    "stateCompressed": {
+      "x": "int16_t measured in mm",
+      "y": "int16_t measured in mm",
+      "z": "int16_t measured in mm",
+      "vx": "int16_t measured in mm s^-1", 
+      "vy": "int16_t measured in mm s^-1",
+      "vz": "int16_t measured in mm s^-1",
+      "ax": "int16_t measured in mm s^-2",
+      "ay": "int16_t measured in mm s^-2",
+      "az": "int16_t measured in mm s^-2",
+      "quat": "int32_T compressed quaternion",
+      "rateRoll": "int16_t measured in millirad s^-2",
+      "ratePitch": "int16_t measured in millirad s^-2",
+      "rateYaw": "int16_t measured in millirad s^-2"
+    }
+  }
+  ```
+- The `quatcompress()` function in `quatcompress.h` is used by `compressState()` to (lossily) compress the 128-bit quaternion to a single 32-bit value by:
+  1. Identifying the quaternion component with the largest magnitude and forcing it to be positive by inverting the quaternion's components (since this saves the need to transmit or store its sign bit - the receiver knows it is always positive).
+  1. Discarding the largest quaternion (since it can be reconstructed from the others using the normalised length condition).
+  1. Quantising each of the remaining three components to a 9-bit magnitude plus a sign bit (10 + 10 + 10 = 30 bits).
+  1. Indicating which of the four quaternion components was removed due to being the largest (either x/y/z/w - requires 2 bits).
+  1. Packaging the data into a single `int32_t` value.  
+
+
+
+### How Does the ESP32-S3 Handle UART?
+
+- It has three dedicated UART controllers (UART0, UART1, UART2).
+- When a FreeRTOS task wants to transmit over UART, it will:
+  1. Format its data into a flat string of bytes (uint8_t).
+  1. Load them into a 128-byte UART TX FIFO buffer.
+- The UART hardware controller will then handle the following: 
+  1. The UART hardware controller will format each byte into a message frame.
+  1. The default message frame configuration is `8N1`, meaning 8 data bits, no parity bits, 1 stop bit (so 10 bits total, including the compulsory start bit). 
+  1. The UART hardware controller has a baud rate generator, which sets the bit/second transmission rate.
+  1. Each message frame is transferred from the FIFO buffer into a shift register by the UART hardware controller.
+  1. The shift register then sends out each bit in the message at the baud rate. 
+- The UART hardware controller can be configured to raise an interrupt once the FIFO buffer has been cleared to a certain count (so the MCU can top it up), as well as when the FIFO buffer has been cleared.
+- Since the FIFO buffer is 128 bytes long, configuring UART to use DMA does not really provide much benefit unless more than 128 bytes are being sent at a time.
