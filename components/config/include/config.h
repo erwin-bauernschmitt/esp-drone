@@ -87,6 +87,7 @@
 // communication TX tasks
 #define UDP_TX_TASK_PRI         2
 #define CRTP_TX_TASK_PRI        2
+#define IMU_UART_TASK_PRI       2
 // communication RX tasks
 #define UDP_RX_TASK_PRI         2
 #define EXTRX_TASK_PRI          2
@@ -122,6 +123,7 @@
 #define CRTP_TX_TASK_NAME       "CRTP-TX"
 #define EXTRX_TASK_NAME         "EXTRX"
 #define FLOW_TASK_NAME          "FLOW"
+#define IMU_UART_TASK_NAME      "IMU_UART"
 #define KALMAN_TASK_NAME        "KALMAN"
 #define LEDSEQCMD_TASK_NAME     "LEDSEQCMD"
 #define LOG_TASK_NAME           "LOG"
@@ -148,6 +150,7 @@
 #define CRTP_TX_TASK_STACKSIZE        (3 * configBASE_STACK_SIZE)
 #define EXTRX_TASK_STACKSIZE          (1 * configBASE_STACK_SIZE)
 #define FLOW_TASK_STACKSIZE           (3 * configBASE_STACK_SIZE)
+#define IMU_UART_TASK_STACKSIZE       (2 * configBASE_STACK_SIZE)
 #define KALMAN_TASK_STACKSIZE         (3 * configBASE_STACK_SIZE)
 #define LEDSEQCMD_TASK_STACKSIZE      (2 * configBASE_STACK_SIZE)
 #define LOG_TASK_STACKSIZE            (3 * configBASE_STACK_SIZE)

@@ -201,6 +201,9 @@ void systemTask(void *arg)
   //}
   soundInit();
   memInit();
+  
+  // Initialise the IMU data transmission via UART
+  imuuartInit();
 
 #ifdef PROXIMITY_ENABLED
   proximityInit();
@@ -227,6 +230,7 @@ void systemTask(void *arg)
   DEBUG_PRINTI("soundTest = %d ", pass);
   pass &= memTest();
   DEBUG_PRINTI("memTest = %d ", pass);
+  
   //pass &= watchdogNormalStartTest();
   pass &= cfAssertNormalStartTest();
 //  pass &= peerLocalizationTest();
