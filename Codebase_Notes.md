@@ -208,7 +208,7 @@ esp_netif_ip_info_t ip_info = {
 - The first initialisation function in `systemInit()` is `wifiLinkInit()` (defined in `wifilink.c`), which creates the `crtpPacketDelivery` queue and creates the `WIFILINK` task (with `PRIORITY=2`) that runs the `wifilinkTask()` function. 
 - The `wifilinkTask()` function bridges the `udpDataRx` queue with the rest of the application logic by forwarding complete CRTP messages from the `udpDataRx` queue to the `crtpPacketDelivery` queue, reformatting any ESP-NOW messages in the `udpDataRx` queue into full CRTP messages before forwarding them. 
 - The `wifilinkTask()` function retrieves messages from the `udpDataRx` queue with `wifiGetDataBlocking()`, which is defined in `wifi_esp32.c` and uses `xQueueReceive()` to block the `WIFILINK` task until a message can be received from the queue. 
-- Note that `commInit()` in `comm.c` uses `crtpSetLink(wifilinkGetLink())` to point the CRTP link struct to the `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions 
+- Note that `commInit()` in `comm.c` uses `crtpSetLink(wifilinkGetLink())` to point the CRTP link struct to the `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions.
 
 #### Task Dump Initialisation
 
@@ -222,7 +222,7 @@ esp_netif_ip_info_t ip_info = {
 - `systemInit()` then calls `crtpInit()` (defined in `crtp.c`), which creates the `txQueue` queue and the `CRTP-TX` and `CRTP-RX` tasks (with `PRIORITY=2`) that run the `crtpTxTask()` and `crtpRxTask()` functions respectively. 
 - Note that `commInit()` in `comm.c` uses `crtpSetLink(wifilinkGetLink())` to point the CRTP link struct to the `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions 
 - `crtpTxTask()` is defined in `crtp.c` and essentially uses function pointers to run `wifilinkSendPacket()` (defined in `wifilink.c`), which makes sure the CRTP packet is not too long, blinks the blue LED, and then uses `wifiSendData()` (defined in `wifi_esp32.c`) to add the packet to the `udpDataTx` queue with `xQueueSend()`. This runs in a loop until `txQueue` is empty, after which the `CRTP-TX` task blocks until another packet is added to `txQueue`. 
-- `crtpRxTask()` is defined in `crtp.` and essentially uses function pointers to run `wifilinkReceiveCRTPPacket()` (defined in `wifilink.c`), which receives a CRTP packet from the `crtpPacketDelivery` queue with `xQueueReceive()` (blocking for up to 100ms if the queue is empty) and blinks the green LED. The `crtpRxTask()` function then adds the CRTP packet to the queue specified within the CRTP packet (see below for list of `CRTPPort` options).
+- `crtpRxTask()` is defined in `crtp.` and essentially uses function pointers to run `wifilinkReceiveCRTPPacket()` (defined in `wifilink.c`), which receives a CRTP packet from the `crtpPacketDelivery` queue with `xQueueReceive()` (blocking for up to 100ms if the queue is empty) and blinks the green LED. The `crtpRxTask()` function then adds the CRTP packet to the queue specified within the CRTP packet (see below for list of `CRTPPort` options), and then calls the callback function associated with that port (if one has been registered).
   ```
   typedef enum {
     CRTP_PORT_CONSOLE          = 0x00,
@@ -244,22 +244,22 @@ esp_netif_ip_info_t ip_info = {
 
 #### Configuration Initialisation
 - `systemInit()` then calls `configblockInit()`, which is made for reading a radio communication configuration from EEPROM over I2C, but since neither ESP-Drone or Dell's Angel has an external EEPROM, it will load the following `configblockDefault` configuration into RAM:
-```
-static configblock_t configblockDefault =
-{
-    .magic = MAGIC,  // 0x43427830
-    .version = VERSION,  // 1
-    .radioChannel = RADIO_CHANNEL,  // 80
-    .radioSpeed = RADIO_DATARATE,  // 2
-    .calibPitch = 0.0,
-    .calibRoll = 0.0,
-    .radioAddress_upper = ((uint64_t)RADIO_ADDRESS >> 32),  // 0xE7E7E7E7E7ULL
-    .radioAddress_lower = (RADIO_ADDRESS & 0xFFFFFFFFULL),
-};
-``` 
+  ```
+  static configblock_t configblockDefault =
+  {
+      .magic = MAGIC,  // 0x43427830
+      .version = VERSION,  // 1
+      .radioChannel = RADIO_CHANNEL,  // 80
+      .radioSpeed = RADIO_DATARATE,  // 2
+      .calibPitch = 0.0,
+      .calibRoll = 0.0,
+      .radioAddress_upper = ((uint64_t)RADIO_ADDRESS >> 32),  // 0xE7E7E7E7E7ULL
+      .radioAddress_lower = (RADIO_ADDRESS & 0xFFFFFFFFULL),
+  };
+  ``` 
 - However, since the CrazyRadio is not being used, this is probably redundant.
 
-#### Worker Initialisation
+#### Worker Queue Initialisation
 - `systemInit()` then calls `workerInit()` (defined in `worker.c`), which just creates the `workerQueue` FreeRTOS queue. 
 
 #### ADC Initialisation
@@ -277,8 +277,152 @@ static configblock_t configblockDefault =
 - Finally, `systemInit()` calls `buzzerInit()` (defined in `buzzer.c`), which calls `buzzDeckInit()` (defined in `buzzdeck.c`) since `CONFIG_BUZZER_ON=1` in `sdkconfig.h` for some reason (potentially redundant since no buzz deck is being used).
 - `buzzDeckInit()` calls `piezzoInit()` (defined in `piezzo.c`), which configures a timer with the ESP32's LED Control peripheral to set the tone of the buzzer, configures a channel with the LED Control peripheral to be able to drive the buzzer pin with the timer, and exposes a control interface so that higher level code can play sounds or patterns.
 
-####
-- `systemTask()` then moves on from `systemInit()` to call `commInit()` (defined in `comm.c`), which...
+#### Communications Initialisation
+- `systemTask()` then moves on from `systemInit()` to call `commInit()` (defined in `comm.c`), which first calls `crtpSetLink(wifilinkGetLink())` to retrieve the wifi-CRTP function pointers defined in `wifilink.c` and then set the CRTP link struct to point to those `wifilink.c` functions, enabling the `CRTP-TX` and `CRTP-RX` tasks to send and receive CRTP packets over UDP via the `wifilink.c` functions. Here, `crtpSetLink()` is defined in `crtp.c`, whilst `wifilinkGetLink()` is defined in `wifilink.c`.
+- Then `commInit()` calls `crtpserviceInit()` (defined in `crtpservice.c`), which uses `crtpRegisterPortCB()` (defined in `crtp.c`) to register the `crtpserviceHandler()` callback function (defined in `crtpservice.c`) with the `CRTP_PORT_LINK` port in the `callbacks[]` array that is defined in `crtp.c`. This allows `crtpserviceHandler()` to automatically process CRTP packets that are addressed to the `CRTP_PORT_LINK` port and get delivered to that port's queue by the `CRTP-RX` task.
+- `crtpserviceHandler()` processes all CRTP packets delivered to the `CRTP_PORT_LINK` port according to which channel is specified in the CRTP packet: packets addressed to the `linkEcho` channel get immediately retransmitted back to the sender with `crtpSendPacket()` (defined in `crtp.c`) for loopback testing, packets addressed to the `linkSink` channel get ignored, and packets addressed to the `linkSource` channel trigger an immediate reply to the sender with a maximum-length CRTP packet that contains the message `Bitcraze Crazyflie` followed by zeros for device identification. 
+- Then `commInit()` calls `platformserviceInit()` (defined in `platformservice.c`), which first calls `appchannelInit()` (defined in `app_channel.c`) to create both the `sendMutex` mutex and `rxQueue` queue (of length 10) and initialise the `overflow` flag as `false`. `platformserviceInit()` then calls `crtpRegisterPortCB()` (defined in `crtp.c`) to register the `platformserviceHandler()` callback function (defined in `platformservice.c`) with the `CRTP_PORT_PLATFORM` port in the `callbacks[]` array that is defined in `crtp.c`. This allows `platformserviceHandler()` to automatically process CRTP packets that are addressed to the `CRTP_PORT_PLATFORM` port and get delivered to that port's queue by the `CRTP-RX` task. 
+- `platformserviceHandler()` processes all CRTP packets delivered to the `CRTP_PORT_PLATFORM` port according to which channel is specified in the CRTP packet: packets addressed to the `platformCommand` channel are currently just echoed back to the sender (implementation incomplete), packets addressed to the `versionCommand` channel trigger an immediate reply to the sender with either the protocol version (`4`), firmware version (`{tag}`?), or platform name (`ESPlane 2.0`) depending on what information was requested in the packet's data field (`getProtocolVersion`, `getFirmwareVersion`, or `getDeviceTypeName`). 
+- Then `commInit()` calls `logInit()` (defined in `log.c`), which scans/validates the compiled-in log table, computes a CRC for versioning, sets up locks and runtime slots, clears any old state, and starts the `LOG` task (with `PRIORITY=2`) that runs the `logTask()` function.
+- The `logTask()` function is defined in `log.c` and it creates the CRTP queue for the `CRTP_PORT_LOG` port, registers it with the `queues[]` array defined in `crtp.c`, and then receives packets from its queue, blocking until a message addressed to `CRTP_PORT_LOG` is delivered to the queue by the `CRTP-RX` task. When a CRTP log packet is received, `logTask()` will process it according to which channel is specified in the CRTP packet: packets addressed to the `TOC_CH` channel trigger the `logTOCProcess()` function to be called, whereas packets addressed to the `CONTROL_CH` channel trigger the `logControlProcess()` function to be be called. The `logTOCProcess()` function triggers an immediate reply to the sender with either information about the log implementation or information about a particular logging variable depending on what information was requested in the packet's data field. The `logControlProcess()` function allows the ground station to group logging variables into blocks and start/stop sampling them at a specified rate for communication to the ground station via CRTP.
+- Then `commInit()` finally calls `paramInit()` (defined in `param.c`), which discovers the compiled-in parameter table (via linker symbols), computes a CRC and sanity-checks names, counts the non-group params, then starts the `PARAM` task (with `PRIORITY=2`) that runs the `paramTask()` function (similar to `logInit()`). 
+- The `paramTask()` function is defined in `param.c` and it creates the CRTP queue for the `CRTP_PORT_PARAM` port, registers it with the `queues[]` array defined in `crtp.c`, and then receives packets from its queue, blocking until a message addressed to `CRTP_PORT_PARAM` is delivered to the queue by the `CRTP-RX` task. When a CRTP log packet is received, `paramTask()` will process it according to which channnel is specified in the CRTP packet: packets addressed to the `TOC_CH` channel trigger an immediate reply to the sender (using `paramTOCProcess()`) with information about either the param implementation or informaiton about a particular param variable depending on which is requested in the packet's data field, packets addressed to the `READ_CH` channel trigger an immediate reply to the sender (using `paramReadProcess()`) with the value of a particular parameter, packets addressed to the `WRITE_CH` channel trigger an immediate reply to the sender (using `paramWriteProcess()`) echoing back the request after updating the param value in RAM, and packets addressed to the `MISC_CH` channel are for changing a parameter identified by group and name rather than by ID (using `paramWriteByNameProcess()`), triggering an immediate echo of the CRTP packet to the sender with the type field being overwritten by the error status returned by `paramWriteByNameProcess()` (note the param must be writeable and must match name, group and data type). 
+
+#### Commander Initialisation
+- `systemTask()` then calls `commanderInit()` (defined in `commander.c`), which creates the `setpointQueue` queue, sends the `nullSetpoint` setpoint to the `setpointQueue`, creates the `priorityQueue` queue, and sends the `priorityDisable` (which is set to `COMMANDER_PRIORITY_DISABLE=0`) to the `priorityQueue` queue. 
+- Then `commanderInit()` calls `crtpCommanderInit()` (defined in `crtp_commander.c`), which redundantly calls `crtpInit()` again and then uses `crtpRegisterPortCB()` (defined in `crtp.c`) to register the `commanderCrtpCB()` callback function (defined in `crtp_commander.c`) with both the `CRTP_PORT_SETPOINT` and `CRTP_PORT_SETPOINT_GENERIC` ports in the `callbacks[]` array (defined in `crtp.c`).
+- The `commanderCrtpCB()` callback function is called whenever the `CRTP-RX` task adds a CRTP packet to the queues associated with either the `CRTP_PORT_SETPOINT` or `CRTP_PORT_SETPOINT_GENERIC` ports, and it first differentiates which port and channel is being targeted by reading the CRTP packet's address. 
+- If the CRTP packet was addressed to channel 0 of the `CRTP_PORT_SETPOINT` port, then `crtpCommanderRpytDecodeSetpoint()` (defined in `crtp_commander_rpyt.c`) is called to parse the CRTP data (currently in the legacy `rpyt` format) into the `setpoint` variable (of type `setpoint_t`) that the stabilizer can then use. In this case, the CRTP packet's data field consists of a `float` for `roll`, `pitch`, and `yaw`, along with a `uint16_t` for `thrust`. The system initialises with `thrustLocked=true`, which keeps the setpoint thrust at zero until a CRTP packet with `thrust=0` is received (after which `thrustLocked=false` and the `thrust` specified in the CRTP packet becomes the updated setpoint thrust after potential clipping to min/max bounds). Then the currently enabled flight modes (`altHoldMode`, `posHoldMode`, `posSetMode`) are used to conditionally parse the `roll`, `pitch`, and `yaw` values into `setpoint` and set the stabilizer `mode` (`modeDisable`, `modeAbs`, `modeVelocity`) for each stabilizer state variable (`x`, `y`, `z`, `roll`, `pitch`, `yaw`, `quat`).
+- If `altHoldMode=true`, then the setpoint's `thrust` is set to zero, `mode.z` is set to `modeVelocity`, and `velocity.z` is set to a value between -1 and +1 depending on the value of the CRTP packet's `thrust`. Hence, if the CRTP packet's `thrust` is at the midpoint of its range, the setpoint for the stabilizer will be to maintain whatever the current altitude is by keeping the vertical velocity zero. By temporarily increasing/decreasing the CRTP packet's `thrust` from its midpoint, the stabilizer will try achieve a 
+positive/negative vertical velocity, allowing the user to change the current altitude before returning `thrust` to its midpoint and holding the new altitude. In other words, the setpoint becomes to hold the current `z` position, which can be changed with the `thrust` control. If `altHoldMode=false`, then the setpoint's `mode.z` is set to `modeDisable`. 
+- If `posHoldMode=true`, then a similar parsing occurs where the setpoint's `mode.x` and `mode.y` are set to `modeVelocity`, `mode.roll` and `mode.pitch` are set to `modeDisable`, `attitude.roll` and `attitude.pitch` are set to zero, `velocity_body` is set to `true` (so that velocity setpoints are interpreted with reference to the drone's frame of reference), and `velocity.x` and `velocity.y` are set to scaled versions of the `roll` and `pitch` values in the CRTP packet respectively. Hence, similarly to if `altHoldMode=true`, the setpoint becomes to hold the current `x` and `y` positions, which can be changed with the `pitch` and `roll` controls respectively.
+- If `posSetMode=true` and the CRTP packet's `thrust` is non-zero, then a similar parsing occurs where `x`, `y`, `z`, and `yaw` are specified in absolute terms by the CRTP packet's `pitch`, `roll`, `thrust` and `yaw` values, so the CRTP packet is repurposed as a pose command. 
+- If all three flight modes are disabled, then the CRTP packet's values are directly parsed into the setpoint's `roll`, `pitch` and `yaw` values either as rates or angles depending on the stabilization mode. The default initialisation is that the setpoint's `roll` and `pitch` values are interpreted as angles, whereas the `yaw` value is interpreted as a rate. This represents the setpoints used in the default manual flight mode. 
+- Once this setpoint has been determined, `commanderCrtpCB()` calls `commanderSetSetpoint()` (defined in `commander.c`) to apply a timestamp to the setpoint, overwrite the current setpoint in the `setpointQueue` queue, and overwrite the current priority in the `priorityQueue` queue with `COMMANDER_PRIORITY_CRTP`. `commanderSetSetpoint()` also calls `crtpCommanderHighLevelStop()`, which ensures that the high-level commander is set to an idle status and any following of a trajectory is aborted so that the newly requested low-level setpoint can be implemented.
+- If the CRTP packet was addressed to the `SET_SETPOINT_CHANNEL` channel of the `CRTP_PORT_SETPOINT_GENERIC` port, then `commanderCrtpCB()` calls `crtpCommanderGenericDecodeSetpoint()` (defined in `crtp_commander_generic.c`) to parse the data in the CRTP packet into `setpoint`. 
+- `crtpCommanderGenericDecodeSetpoint()` uses a sort of switch case where it reads the CRTP packet's type to see what kind of setpoint is being requested, then it wipes the current setpoint variable by resetting it to all zeros, and then it calls the decoder function for that setpoint type to parse the subsequent data in the CRTP packet into `setpoint`. The `packetDecoders[]` array that maps the setpoint types to their decoder functions is shown below:
+
+  ```
+  const static packetDecoder_t packetDecoders[] = {
+    [stopType]          = stopDecoder,
+    [velocityWorldType] = velocityDecoder,
+    [zDistanceType]     = zDistanceDecoder,
+    [cppmEmuType]       = cppmEmuDecoder,
+    [altHoldType]       = altHoldDecoder,
+    [hoverType]         = hoverDecoder,
+    [fullStateType]     = fullStateDecoder,
+    [positionType]      = positionDecoder,
+  };
+  ```
+- `stopDecoder()` just leaves `setpoint` as all zeros, causing the motors to stop and the drone to fall to the ground. 
+- `velocityDecoder()` sets the x/y/z velocities and the yaw rate.
+- `zDistanceDecoder()` sets the absolute z value, the roll and pitch angles, and the yaw rate.
+- `cppmEmuDecoder()` allows you to emulate a radio receiving combined pulse position modulated (CPPM) signals for roll/pitch/yaw/thrust. With PPM, each of a controller's stick values (like the roll stick) is mapped to a value between 1000 and 2000, with the neutral midpoint being 1500. Then these can be combined or "time multiplexed" train of fixed width pulses, where the pulses separated by a number of microseconds equal to the stick values. On the receiver end, these pulse trains would be decoded back into a set of stick values between 1000 and 2000. The decoder function parses such values for roll/pitch.yaw/thrust into `setpoint` by normalising them.
+- `altHoldDecoder()` sets the vertical velocity (set to zero for holding current altitutde), as well as the roll and pitch.
+- `hoverDecoder()` sets the absolute height, x/y velocities in the drone's frame of reference, and the yaw rate.
+- `fullStateDecoder()` sets every element of `setpoint` to specify an entire state.
+- `positionDeocder()` sets the absolute x/y/z positions and yaw angle.
+- Again, once this setpoint has been determined, `commanderCrtpCB()` calls `commanderSetSetpoint()` (defined in `commander.c`) to apply a timestamp to the setpoint, overwrite the current setpoint in the `setpointQueue` queue, and overwrite the current priority in the `priorityQueue` queue with `COMMANDER_PRIORITY_CRTP`. `commanderSetSetpoint()` also calls `crtpCommanderHighLevelStop()`, which ensures that the high-level commander is set to an idle status and any following of a trajectory is aborted so that the newly requested low-level setpoint can be implemented.
+- If the CRTP packet was addressed to the `META_COMMAND_CHANNEL` channel of the `CRTP_PORT_SETPOINT_GENERIC` port, then `commanderCrtpCB()` uses a similar sort of switch case where it reads the CRTP packet's type to see what kind of metacommand is being requested and then uses a decoder function to implement that metacommand. Currently there is only one type of metacommand that can be requested via CRTP (the `metaNotifySetpointsStop` type), which executes the `notifySetpointsStopDecoder()` function. This function modifies the current setpoint's timestamp to extend its validity by the number of milliseconds specified in the CRTP packet's data, and this function is used if the ground station wants to prevent the high-level commander from timing out before it's ready to send another setpoint. 
+
+- Then `commanderInit()` calls `crtpCommanderHighLevelInit()` (defined in `crtp_commander_high_level.c`), which first registers the `memDef` memory handler (a collection of pointers to memory management functions) with the `handlers[]` array defined in `mem.c`. 
+- `crtpCommanderHighLevelInit()` then calls `plan_init()` (defined in `planner.c`), which initialises the previously declared `planner` as configured for a one-piece piecewise trajectory, although with no current trajectory and an idle status.
+- `crtpCommanderHighLevelInit()` then creates the `CMDHL` task (with `PRIORITY=3`), which runs the `crtpCommanderHighLevelTask()` function (also defined in `crtp_commander_high_level.c`).
+- After this, `crtpCommanderHighLevelInit()` creates the `lockTraj` mutex to prevent trajectories from being modified or updated whilst they are being executed, and then initialises the float for `yaw` and vectors for `pos` and `vel` as all zeros (these are used by `crtp_commander_high_level.c` to remember the last setpoint for creating new setpoints from high-level commands).
+- `crtpCommanderHighLevelTask()` first creates a CRTP queue for the `CRTP_PORT_SETPOINT_HL` port and then reads from the queue in a loop, blocking until the `CRTP-RX` receives a CRTP packet addressed for that port and adds it to the queue. When a CRTP packet is received, it reads the packet to see which high-level command is being requested, and then calls the appropriate function with a switch case to plan the execution of the requested command with the requested parameters, replying to the sender of the CRTP packet with an echo that also contains the return value of the planning. The available high-level commands are shown below:
+
+  ```
+  enum TrajectoryCommand_e {
+    COMMAND_SET_GROUP_MASK          = 0,
+    COMMAND_TAKEOFF                 = 1, // Deprecated, use COMMAND_TAKEOFF_2
+    COMMAND_LAND                    = 2, // Deprecated, use COMMAND_LAND_2
+    COMMAND_STOP                    = 3,
+    COMMAND_GO_TO                   = 4,
+    COMMAND_START_TRAJECTORY        = 5,
+    COMMAND_DEFINE_TRAJECTORY       = 6,
+    COMMAND_TAKEOFF_2               = 7,
+    COMMAND_LAND_2                  = 8,
+    COMMAND_TAKEOFF_WITH_VELOCITY   = 9,
+    COMMAND_LAND_WITH_VELOCITY      = 10,
+  };
+  ```
+- Note that this is the general structure of a setpoint:
+
+  ```
+  typedef struct setpoint_s {
+    uint32_t timestamp;
+
+    attitude_t attitude;      // deg
+    attitude_t attitudeRate;  // deg/s
+    quaternion_t attitudeQuaternion;
+    float thrust;
+    point_t position;         // m
+    velocity_t velocity;      // m/s
+    acc_t acceleration;       // m/s^2
+    bool velocity_body;       // true if velocity is given in body frame; false if velocity is given in world frame
+
+    struct {
+      stab_mode_t x;
+      stab_mode_t y;
+      stab_mode_t z;
+      stab_mode_t roll;
+      stab_mode_t pitch;
+      stab_mode_t yaw;
+      stab_mode_t quat;
+    } mode;
+  } setpoint_t;
+  ```
+
+
+#### Kalman Filter Initialisation
+- Note that these are the possible state estimator types (i.e., complementary or kalman):
+  ```
+  typedef enum {
+    anyEstimator = 0,
+    complementaryEstimator,
+    kalmanEstimator,
+    StateEstimatorTypeCount,
+  } StateEstimatorType;
+  ```
+- `systemTask()` then initialises the state estimator type as `estimator = anyEstimator` and calls `estimatorKalmanTaskInit()` (defined in `estimator_kalman.c`), which initialises the data queues shown below, creates the `runTaskSemaphore` semaphore (taken/given at the start/end of each loop of `kalmanTask()`), creates the `dataMutex` mutex (used for brief operations when copying sensor data or updating state estimations to maintain atomicity between the kalman estimator and the stabilizer), and starts the `KALMAN` task (with `PRIORITY=4`), which runs the `kalmanTask()` function (also defined in `estimator_kalman.c`).
+  ```
+  distDataQueue  // Distance-to-point measurements
+  posDataQueue  // Direct measurements of Crazyflie position
+  poseDataQueue  // Direct measurements of Crazyflie pose
+  tdoaDataQueue  // Measurements of a UWB Tx/Rx
+  flowDataQueue  // Measurements of flow (dnx, dny)
+  tofDataQueue  // Measurements of TOF from laser sensor
+  heightDataQueue  // Absolute height along room's Z
+  yawErrorDataQueue  // Yaw error?
+  ```
+- Before entering the main while loop, the `kalmanTask()` function first calls `systemWaitStart()`, which causes the `KALMAN` task to wait until `systemInit()` has completed and `systemStart()` (both defined in `system.c`) has been called, initialises four time stamps with the current time, and calls `rateSupervisorInit()` (defined in `rateSupervisor.c`) to initialise the rate supervisor context. 
+- In the main while loop, the `runTaskSemaphore` semaphore is taken, the kalman estimator is reset if the `resetEstimation` parameter has been set to `true` by the user, the `doneUpdate` flag is initialised as `false`, and the current time is saved in `osTick` (measured in milliseconds). 
+- Before running the system dynamics to predict the state forward, the `kalmanTask()` checks if the `osTick` has reached `nextPrediction`. To predict the state forward, the `predictStateForward()` function (also defined in `estimator_kalman.c`) is called with the current time `osTick` and the time interval since the last prediction `dt=osTick-lastPrediction`, setting `lastPrediction-osTick` and `doneUpdate=true` upon successfully returning.
+- The `predictStateForward()` function first checks if `gyroAccumulatorCount`, `accAccumulatorCount`, or `thrustAccumulatorCount` are equal to zero (i.e., if any of those state variables haven't been sampled once), returning `false` if there is insufficient data to predict the state forward. 
+- It should be noted that the only way these variables get incremented is after `estimatorKalman()` (defined in `estimator_kalman.c`) is called, which can only be called by `estimatorFunctions[currentEstimator].update()` (defined in `estimator.c`) if `currentEstimator=kalmanEstimator`. The call `estimatorFunctions[currentEstimator].update()` can only be made by `stateEstimator()` (defined in `estimator.c`), and that is only called by the `stabilizerTask()` main loop, which is triggered every time the SENSORS task responds to the IMU ISR by reading and processing the IMU data, which occurs whenever the IMU raises its INT pin. 
+- As for setting `currentEstimator`, it is initialised as `anyEstimator` in `estimator.c` (and `estimator` is initialised as `anyEstimator` in `system.c` too). The only way `currentEstimator` can be updated is by calling `stateEstimatorSwitchTo()` (defined in `estimator.c`), which can update the value of a `StateEstimatorType` variable (such as `currentEstimator`) to the value passed to `stateEstimatorSwitchTo()` after ensuring that the requested estimator has been initialised. Note that if `stateEstimatorSwitchTo()` is passed a `StateEstimatorType` variable with the "default" value of `anyEstimator`, then it will switch its value to `complementaryEstimator`. Also note that `stateEstimatorSwitchTo()` will override the requested estimator type with `forcedEstimator` if `forcedEstimator` is something other than `anyEstimator`, although `forcedEstimator` is set by the `ESTIMATOR_NAME` macro, which is currently set to `anyEstimator`. The only time `stateEstimatorSwitchTo()` is explicitly called is in the main loop of the `stabilizerTask()` function in `stabilizer.c`, where it checks if its `StateEstimatorType` variable `estimatorType` is the same as `currentEstimator` in `estimator.c` by calling `getStateEstimator()` (defined in `estimator.c`), which just returns the value of `currentEstimator`. If there is a mismatch, then the main loop of `stabilizerTask()` calls `stateEstimatorSwitchTo()` to update `currentEstimator` to match `estimatorType`. `estimatorType` is zero initialised by default, and so its value starts as `anyEstimator`, but it can be changed in two ways. It is registered as a parameter and so one way it can be changed is by the user via CRTP. The other way is when `stabilizerInit()` is called, which only happens once during startup when `systemTask()` calls `stabilizerInit()` with the `estimator` variable that was initialised as `anyEstimator`. When this happens, the value of `estimator` inside the function gets updated with the result of `deckGetRequiredEstimator()` (defined in `estimator.c`), which just returns the value of `requiredEstimator`, before calling `stateEstimatorInit()` with the updated `estimator` (and all `stateEstimatorInit()` does is call `stateEstimatorSwitchTo()` with the estimator type it's been passed - this is the only time `stateEstimatorSwitchTo()` is called indirectly). The value of `requiredEstimator` is also initialised as `anyEstimator`, and the only way that `requiredEstimator` can be updated is by calling `registerRequiredEstimator()` (defined in `estimator.c`) with the requested estimator type. The only way `registerRequiredEstimator()` is called is by `setCommandermode()`  and sets `estimatorType = getStateEstimator()`, but this . 
+
+- Then `predictStateForward()` takes the `dataMutex` mutex, computes average accel, gyro, and thrust values over the `dt` period by dividing the accumulated measurements during that interval by the number of measurements (whilst simultaneously converting units). Then the accumulator variables and count variables are reset to zero before returning the `dataMutex` mutex.  
+
+#### Stabiliser Initialisation
+- `systemTask()` then calls `stabilizerInit(estimator)`(defined in `stabilizer.c`), which
+
+#### Sound Initialisation
+- `systemTask()` then calls `soundInit()` (defined in `sound_cf2.c`), which
+
+#### Memory Initialisation
+- `systemTask()` then calls `memInit()` (defined in `mem.c`), which
+
+#### Pre-Start Checks
+- `systemTask()` then does a chain of checks to confirm that each initialisation completed successfully, mostly by checking if each module's `isInit` variable is `true`, although this also includes performing the one-by-one 150ms motor test pulse, enabling the LED sequences (just allows them to start), and checking if any previous errors had caused the system to restart to get to this point. 
+
+#### Startup
+- If all of the pre-start checks pass, then `systemTask()` calls `systemStart()` to give the `canStartMutex` mutex (which seemingy isn't used anywhere), logs that the system passed its pre-start checks and is starting, tells the sound subsystem to play a startup sound with `soundSetEffect()`, blinks the green LED 7 times to indicate the system passsed its pre-start checks and is starting (using `ledseqRun()`), and starts blinking the blue LED every 2 seconds as a heartbeat signal (also using `ledseqRun()`).
+- If the `systemTest()` check passes but something else fails, then the drone rapidly blinks the blue LED in a loop and can still be forced to start by setting the `selftestPassed` param to `1` via CF Client.
+- If the `systemTest()` fails, then the drone will set the blue LED to be on constantly. 
+- Regardless of the startup test outcomes, the drone will then call `workerLoop()` (if the worker loop erroneously exits for some reason, the system will get stuck in an infinite while loop guard after the call of `workerLoop()`).
+
+
 
 ## ESP32-Pi UART Communication 
 
@@ -406,3 +550,6 @@ static configblock_t configblockDefault =
   1. The shift register then sends out each bit in the message at the baud rate. 
 - The UART hardware controller can be configured to raise an interrupt once the FIFO buffer has been cleared to a certain count (so the MCU can top it up), as well as when the FIFO buffer has been cleared.
 - Since the FIFO buffer is 128 bytes long, configuring UART to use DMA does not really provide much benefit unless more than 128 bytes are being sent at a time.
+
+
+- The ESP32-S3 will communicate to the Raspberry Pi Zero 2 W using the UART2 controller via pins IO38 (for the ESP32 to receive) and IO39 (for the ESP32 to transmit). 
