@@ -1,7 +1,7 @@
 /* ------------------------------ Module Start ------------------------------ */
 
 /**
- * @file imu_uart.h
+ * @file uart_sync.h
  * @brief Public APIs for the ESP32->Pi UART communication.
  *
  *                  $$$$$$$\            $$\ $$\ $$\
@@ -38,8 +38,8 @@
 
 /* ----------------------------- Include Guard ------------------------------ */
 
-#ifndef __IMU_UART_H__
-#define __IMU_UART_H__
+#ifndef __UART_SYNC_H__
+#define __UART_SYNC_H__
 
 /* -------------------------------- Includes -------------------------------- */
 
@@ -49,20 +49,27 @@
 /* ------------------------------ Public APIs ------------------------------- */
 
 /**
- * @brief Initialise the IMU→UART module and start its FreeRTOS task.
- *
+ * @brief Initialise the UART sync module and start its FreeRTOS task
+ * 
  * Safe to call multiple times; subsequent calls are no-ops once initialised.
- * Creates the task that will package IMU data and send it over UART.
+ * Creates the task that will respond to UART sync requests from the Pi.
  */
-void imuuartInit(void);
+void uartsyncInit(void);
 
 /**
- * @brief Check if the IMU→UART module has initialised successfully.
+ * @brief Check if the UART sync module initialised correctly
  * 
- * @retval true		The UART module successfully completed running imuuartInit()
- * @retval false	The UART module failed to complete running imuuartInit()
+ * @retval true		The UART sync module successfully completed running its init
+ * @retval false	The UART sync module failed to complete running its init
  */
-bool imuuartTest(void);
+bool uartsyncTest(void);
+
+/**
+ * @brief Notify the UART sync module that the UART sync ISR fired
+ * 
+ * This is to be called by the UART sync ISR.
+ */
+void uartsyncNotify(void);
 
 #endif
 

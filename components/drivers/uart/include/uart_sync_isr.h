@@ -1,8 +1,8 @@
 /* ------------------------------ Module Start ------------------------------ */
 
 /**
- * @file imu_uart.h
- * @brief Public APIs for the ESP32->Pi UART communication.
+ * @file uart_sync_isr.h
+ * @brief Public APIs for the UART sync ISR.
  *
  *                  $$$$$$$\            $$\ $$\ $$\
  *                  $$  __$$\           $$ |$$ |$  |
@@ -25,8 +25,7 @@
  *                               \$$$$$$  |
  *                                \______/
  * 
- * This file contains public APIs for transmitting IMU or state data from the to
- * ESP32 to the Pi via UART.
+ * This file contains public APIs for the UART sync ISR.
  *
  * @author Erwin Bauernschmitt <22964301@student.uwa.edu.au>
  * @date 30 September 2025
@@ -38,32 +37,48 @@
 
 /* ----------------------------- Include Guard ------------------------------ */
 
-#ifndef __IMU_UART_H__
-#define __IMU_UART_H__
+#ifndef __UART_SYNC_ISR_H__
+#define __UART_SYNC_ISR_H__
 
 /* -------------------------------- Includes -------------------------------- */
 
 // Standard includes
+#include <stdint.h>
 #include <stdbool.h>
+
+// ESP-IDF includes
+#include "driver/uart.h"
+#include "driver/gpio.h"
 
 /* ------------------------------ Public APIs ------------------------------- */
 
 /**
- * @brief Initialise the IMU→UART module and start its FreeRTOS task.
- *
- * Safe to call multiple times; subsequent calls are no-ops once initialised.
- * Creates the task that will package IMU data and send it over UART.
- */
-void imuuartInit(void);
-
-/**
- * @brief Check if the IMU→UART module has initialised successfully.
+ * @brief Initialise a falling-edge ISR on the given UART RX pin.
  * 
- * @retval true		The UART module successfully completed running imuuartInit()
- * @retval false	The UART module failed to complete running imuuartInit()
+ * Call this once before starting the UART_SYNC task.
+ * 
+ * @param[in] rxPin	The RX pin to attach the ISR to.
+ * 
+ * @return ESP_OK if succesful, other esp_err_t type if unsuccessful.
  */
-bool imuuartTest(void);
+esp_err_t uartsyncisrInit(gpio_num_t rxPin);
 
-#endif
+ /**
+ * @brief Receive one UART sync request timestamp from the queue.
+ *
+ * Copies the latest UART sync request's start-bit timestamp (in microseconds) 
+ * from it's queue into @p timestamp.
+ *
+ * @note This call consumes one item from the queue; call it at most once per
+ *       UART sync request.
+ *
+ * @param[out] timestamp Pointer to the variable that receives the timestamp.
+ *
+ * @retval true  A timestamp was available and written to @p timestamp.
+ * @retval false No timestamp was available; @p timestamp is not modified.
+ */
+bool readUartSyncTimeQueue(uint64_t *timestamp);
 
-/* ------------------------------- Module End ------------------------------- */
+#endif 
+
+/* ------------------------------- End Module ------------------------------- */
