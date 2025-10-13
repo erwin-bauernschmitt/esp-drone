@@ -309,8 +309,8 @@ static void sensorsTask(void *param)
             // Overwrite data in gyroProcessedQueue with latest processed IMU gyro data
             xQueueOverwrite(gyroProcessedQueue, &sensorData.gyro);
 
-						// Make non-volatile copy
-						uint64_t imuIntTimestampCopy = imuIntTimestamp; 
+            // Make non-volatile copy
+            uint64_t imuIntTimestampCopy = imuIntTimestamp; 
 
             // Overwrite data in the imuTimestampQueue with the latest IMU timestamp
             xQueueOverwrite(imuTimestampQueue, &imuIntTimestampCopy);
@@ -767,20 +767,20 @@ static void sensorsTaskInit(void)
 
   // EDIT {
   
-	// Create FreeRTOS queue for raw IMU acceleration data
-	accelRawQueue = STATIC_MEM_QUEUE_CREATE(accelRawQueue);
+  // Create FreeRTOS queue for raw IMU acceleration data
+  accelRawQueue = STATIC_MEM_QUEUE_CREATE(accelRawQueue);
 
-	// Create FreeRTOS queue for raw IMU gyro data
-	gyroRawQueue = STATIC_MEM_QUEUE_CREATE(gyroRawQueue);
+  // Create FreeRTOS queue for raw IMU gyro data
+  gyroRawQueue = STATIC_MEM_QUEUE_CREATE(gyroRawQueue);
 
-	// Create FreeRTOS queue for processed IMU acceleration data
-	accelProcessedQueue = STATIC_MEM_QUEUE_CREATE(accelProcessedQueue);
+  // Create FreeRTOS queue for processed IMU acceleration data
+  accelProcessedQueue = STATIC_MEM_QUEUE_CREATE(accelProcessedQueue);
 
-	// Create FreeRTOS queue for processed IMU gyro data
-	gyroProcessedQueue = STATIC_MEM_QUEUE_CREATE(gyroProcessedQueue);
+  // Create FreeRTOS queue for processed IMU gyro data
+  gyroProcessedQueue = STATIC_MEM_QUEUE_CREATE(gyroProcessedQueue);
 
-	// Create FreeRTOS queue for IMU timestamp
-	imuTimestampQueue = STATIC_MEM_QUEUE_CREATE(imuTimestampQueue);
+  // Create FreeRTOS queue for IMU timestamp
+  imuTimestampQueue = STATIC_MEM_QUEUE_CREATE(imuTimestampQueue);
 
 	// }
 

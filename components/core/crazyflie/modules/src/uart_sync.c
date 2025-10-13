@@ -177,21 +177,21 @@ static void uartsyncTask(void *param)
 				if (writeResult != true)
 				{
 					// Notify the user of the error via debug
-					DEBUG_PRINTE("Packet not queued, failed to write to FIFO\n");
+					DEBUG_PRINTE("Packet not queued, failed to write to FIFO");
 				}
 			}
 			// If the FIFO buffer was not empty by write time
 			else
 			{
 				// Notify the user of the error via debug
-				DEBUG_PRINTE("Packet not queued, FIFO not empty\n");
+				DEBUG_PRINTE("Packet not queued, FIFO not empty");
 			}
 		}
 		// If the timestamp data was not successfully received
 		else
 		{
 			// Notify the user of the error via debug
-			DEBUG_PRINTE("Failed to receive timestamp data for the packet\n");
+			DEBUG_PRINTE("Failed to receive timestamp data for the packet");
 		}
 
 		// Reset the boolean for receiving all necessary data after sending
@@ -231,7 +231,7 @@ void uartsyncInit(void)
 	if (error != ESP_OK)
 	{
 		// Notify user of error via debug
-		DEBUG_PRINTE("Failed to initialise UART sync ISR\n");
+		DEBUG_PRINTE("Failed to initialise UART sync ISR");
 
 		// Set the isInit flag to false, since the UART initialisation failed
 		isInit = false;
@@ -240,7 +240,7 @@ void uartsyncInit(void)
 	else
 	{
 		// Notify user of successful UART sync ISR initialisation
-		DEBUG_PRINTI("Successfully initialised UART sync ISR\n");
+		DEBUG_PRINTI("Successfully initialised UART sync ISR");
 
 		// Create the UART_SYNC task (with PRIORITY=8), which runs the uartsyncTask() function
 		STATIC_MEM_TASK_CREATE(uartsyncTask, uartsyncTask, UART_SYNC_TASK_NAME,NULL, UART_SYNC_TASK_PRI);

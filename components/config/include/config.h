@@ -87,8 +87,8 @@
 // communication TX tasks
 #define UDP_TX_TASK_PRI         2
 #define CRTP_TX_TASK_PRI        2
-#define IMU_UART_TASK_PRI       8   // EDIT
-#define UART_SYNC_TASK_PRI      8   // EDIT
+#define IMU_UART_TASK_PRI       5   // EDIT
+#define UART_SYNC_TASK_PRI      5   // EDIT
 // communication RX tasks
 #define UDP_RX_TASK_PRI         2
 #define EXTRX_TASK_PRI          2

@@ -170,7 +170,7 @@ static void imuuartTask(void *param)
 	const char* dataTypeName = uartDataTypeName(uartDataType);
 
 	// Debug print the UART data type
-	DEBUG_PRINTI("UART data type set to default: %s\n", dataTypeName);
+	DEBUG_PRINTI("UART data type set to default: %s", dataTypeName);
 
 	// Initialise a buffer to hold the flattened data
 	uint8_t buffer[MAX_DATA_SIZE] = {0};
@@ -211,7 +211,7 @@ static void imuuartTask(void *param)
 			dataTypeName = uartDataTypeName(currentDataType);
 
 			// Notify of change with debug message
-			DEBUG_PRINTI("UART data type changed to: %s\n", dataTypeName);
+			DEBUG_PRINTI("UART data type changed to: %s", dataTypeName);
 			
 			// Update memory of the previous UART data type
 			previousDataType = currentDataType;
@@ -229,6 +229,16 @@ static void imuuartTask(void *param)
 		// Receive the most recent IMU timestamp into the timestamp variable
 		isDataReceived &= readImuTimestampQueue(&imuTimestamp);
 
+		// If timestamp was not received successfully
+		if (isDataReceived == false)
+		{
+			// Notify user of error via debug
+			DEBUG_PRINTE("Failed to receive timestamp for the packet");
+
+			// Skip to next loop iteration
+			continue;
+		}
+
 		// Reset the buffer offset
 		offset = 0;
 
@@ -236,6 +246,7 @@ static void imuuartTask(void *param)
 		switch (currentDataType) 
 		{
 			case rawImuData:
+			{
 				// Receive data from the raw accel queue
 				Axis3i16 accelRaw = {0};
 				isDataReceived &= readAccelRawQueue(&accelRaw);
@@ -263,12 +274,13 @@ static void imuuartTask(void *param)
 				else 
 				{
 					// If all necessary data for the packet was not received:
-					DEBUG_PRINTE("Failed to receive all raw IMU data for the packet\n");
+					DEBUG_PRINTE("Failed to receive all raw IMU data for the packet");
 					continue;
 				}
 				break;
-
+			}
 			case processedImuData:
+			{
 				// Receive data from the processed accel queue
 				Axis3f accelProcessed = {0};
 				isDataReceived &= readAccelProcessedQueue(&accelProcessed);
@@ -296,12 +308,13 @@ static void imuuartTask(void *param)
 				else 
 				{
 					// If all necessary data for the packet was not received:
-					DEBUG_PRINTE("Failed to receive all processed IMU data for the packet\n");
+					DEBUG_PRINTE("Failed to receive all processed IMU data for the packet");
 					continue;
 				}
 				break;
-
+			}
 			case kalmanStateData:
+			{
 				// Receive data from the kalman-filtered state queue
 				state_t state = {0};
 				isDataReceived &= readKalmanStateQueue(&state);
@@ -327,15 +340,17 @@ static void imuuartTask(void *param)
 				else 
 				{
 					// If all necessary data for the packet was not received:
-					DEBUG_PRINTE("Failed to receive kalman-filtered state data for the packet\n");
+					DEBUG_PRINTE("Failed to receive kalman-filtered state data for the packet");
 					continue;
 				}
-			break;
-
+				break;
+			}
 			default:
+			{
 				// If the requested UART data type is not valid:
-				DEBUG_PRINTE("Invalid UART data type requested\n");
+				DEBUG_PRINTE("Invalid UART data type requested");
 				continue;
+			}
 		}
 
 		// Compute CRC over buffer[0..offset-1]
@@ -362,7 +377,7 @@ static void imuuartTask(void *param)
 			if (hint == uartBufferHasSpace)
 			{
 				// Warn user via debug that packets are not clearing fast enough 
-				DEBUG_PRINTW("Packet queued, but FIFO buffer was not empty\n");
+				DEBUG_PRINTW("Packet queued, but FIFO buffer was not empty");
 			}
 		}
 		else
@@ -371,13 +386,13 @@ static void imuuartTask(void *param)
 			if (hint == uartBufferTooFull)
 			{
 				// Notify user of the error via debug
-				DEBUG_PRINTE("Packet not queued, FIFO buffer too full\n");
+				DEBUG_PRINTE("Packet not queued, FIFO buffer too full");
 			}
 			// If packet is too long to ever fit in the buffer
 			else if (hint == uartDataTooLong)
 			{
 				// Notify user of the error via debug
-				DEBUG_PRINTE("Packet not queued, packet longer than FIFO buffer\n");
+				DEBUG_PRINTE("Packet not queued, packet longer than FIFO buffer");
 			}
 		}
 		
@@ -413,7 +428,7 @@ void imuuartInit(void)
 	if (error != ESP_OK) 
 	{
 		// Notify user of error via debug
-		DEBUG_PRINTE("Failed to initialise UART hardware controller\n");
+		DEBUG_PRINTE("Failed to initialise UART hardware controller");
 
 		// Set the isInit flag to false, since the UART initialisation failed
 		isInit = false;
@@ -421,7 +436,7 @@ void imuuartInit(void)
 	else
 	{
 		// Notify user of successful UART hardware initialisation
-		DEBUG_PRINTI("Successfully initialised UART hardware controller\n");
+		DEBUG_PRINTI("Successfully initialised UART hardware controller");
 
 		// Create the IMU_UART task (with PRIORITY=2), which runs the imuuartTask() function
 		STATIC_MEM_TASK_CREATE(imuuartTask, imuuartTask, IMU_UART_TASK_NAME,NULL, IMU_UART_TASK_PRI);
